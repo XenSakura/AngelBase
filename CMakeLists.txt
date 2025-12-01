@@ -18,8 +18,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
 
-#creating engine static library
-add_library(engine STATIC)
+#creating engine executable
+add_executable(KitsuneEngine)
 
 
 
