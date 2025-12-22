@@ -4,7 +4,7 @@
 cmake_minimum_required(VERSION 4.0)
 message(STATUS "Building using CMAKE Version: ${CMAKE_MAJOR_VERSION}.${CMAKE_MINOR_VERSION}.${CMAKE_PATCH_VERSION}")
 
-project(KitsuneEngine VERSION 0.1 LANGUAGES C CXX)
+project(AngelBase VERSION 0.1 LANGUAGES C CXX)
 
 #needs Vulkan
 find_package(Vulkan REQUIRED)
@@ -19,7 +19,7 @@ set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
 
 #creating engine executable
-add_executable(KitsuneEngine)
+add_executable(AngelBase)
 
 
 
