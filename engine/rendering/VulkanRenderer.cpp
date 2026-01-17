@@ -2,11 +2,9 @@
 
 #define VULKAN_HPP_DISPATCH_LOADER_DYNAMIC 1
 #include <vulkan/vulkan.hpp>
-
 #include "vk_mem_alloc.h"
 
 #define GLFW_INCLUDE_NONE
-#include "../../build/_deps/assimp-src/code/AssetLib/glTF/glTFImporter.h"
 #include "assimp/Vertex.h"
 #include "GLFW/glfw3.h"
 
@@ -22,6 +20,7 @@ import RenderTargetManager;
 import VulkanCommand;
 import VulkanDescriptors;
 import ServiceLocator;
+import ShaderManager;
 import VulkanPipeline;
 VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 
@@ -425,12 +424,16 @@ namespace Rendering::Vulkan
 				
 			}
 
+			//11. handle shaders
 			{
-				
+				Rendering::ShaderManager shaderManager;
+				shaderManager.initialize();
+				shaderManager.compileShader("shader","./assets/shaders/", vk::ShaderStageFlagBits::eFragment);
 			}
 
 			//11. Build the pipelines
 			{
+				/*
 				// Create pipeline layout
 				{
 					auto layout = m_pipeline_manager.get()->createPipelineLayout(
@@ -461,6 +464,7 @@ namespace Rendering::Vulkan
 
 				// Cache it
 				m_pipeline_manager.get()->cachePipeline("main_pipeline", pipeline, layout);
+				*/
 			}
 #ifdef _DEBUG
 			//12. initialize imgui
@@ -490,23 +494,24 @@ namespace Rendering::Vulkan
 				m_context.device.destroyFence(frame_resources[i].fence);
 			}
 
-			m_descriptor_manager.reset();
+			
 			ServiceLocator::Instance()->Unregister<DescriptorManager>();
+			m_descriptor_manager.reset();
 			
 			//destroy command pools
-			m_command_pool_manager.reset();
 			ServiceLocator::Instance()->Unregister<CommandPoolManager>();
+			m_command_pool_manager.reset();
 			
 			// Destroy rendertargets
-			m_render_target_manager.reset();
 			ServiceLocator::Instance()->Unregister<RenderTargetManager>();
+			m_render_target_manager.reset();
 			
 			//execute deletion
 			m_destructor.clear();
 
 			//destroy swapchain and free swapchain manager
-			m_swapchain_manager.reset();
 			ServiceLocator::Instance()->Unregister<SwapchainManager>();
+			m_swapchain_manager.reset();
 			
 			m_context.instance.destroySurfaceKHR(m_context.surface);
 
@@ -515,9 +520,9 @@ namespace Rendering::Vulkan
 			m_context.instance.destroyDebugUtilsMessengerEXT(m_context.debug_callback);
 
 			m_context.instance.destroy();
-
-			m_window_manager.reset();
+			
 			ServiceLocator::Instance()->Unregister<WindowManager>();
+			m_window_manager.reset();
 		}
 	}; 
 }

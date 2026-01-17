@@ -5,6 +5,9 @@ export module VulkanPipeline;
 import ServiceLocator;
 import VulkanContext;
 import RenderTargetManager;
+
+import std;
+
 namespace Rendering::Vulkan
 {
     export class PipelineManager : public ISystem
@@ -198,8 +201,9 @@ namespace Rendering::Vulkan
                         return buildGraphics();
                     case PipelineType::Compute:
                         return buildCompute();
+                    //TODO:
                     case PipelineType::RayTracing:
-                        return buildRayTracing();
+                        return buildGraphics();
                 }
                 return nullptr;
             }
@@ -289,7 +293,7 @@ namespace Rendering::Vulkan
                 }
                 return result.value;
             }
-            
+            /*
             vk::Pipeline buildRayTracing() {
                 vk::RayTracingPipelineCreateInfoKHR pipelineInfo{};
                 pipelineInfo.stageCount = static_cast<uint32_t>(m_shaderStages.size());
@@ -304,7 +308,7 @@ namespace Rendering::Vulkan
                     throw std::runtime_error("Failed to create ray tracing pipeline");
                 }
                 return result.value;
-            }
+            }*/
         };
 
         // Get a builder instance

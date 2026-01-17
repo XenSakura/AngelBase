@@ -628,3 +628,7 @@ FodyWeavers.xsd
 
 # JetBrains Rider
 *.sln.iml
+
+CMakeDoxyfile.in
+
+CMakeDoxygenDefaults.cmake

@@ -1,8 +1,6 @@
-
 #include <compare>
 
 import VulkanRenderer;
- 
 
 int main()
 {

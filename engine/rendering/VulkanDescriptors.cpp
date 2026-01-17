@@ -21,6 +21,7 @@ namespace Rendering::Vulkan
         vk::DescriptorPool& createDescriptorPool()
         {
             m_pool = m_context.device.createDescriptorPool(m_pool_create_info);
+            m_allocate_info.descriptorPool = m_pool;
             return m_pool;
         }
 
@@ -60,9 +61,10 @@ namespace Rendering::Vulkan
         vk::DescriptorSetAllocateInfo m_allocate_info;
         vk::DescriptorSet m_set;
         vk::DescriptorPoolCreateInfo m_pool_create_info;
-        std::array<vk::DescriptorPoolSize, 3> m_pool_sizes;
-        std::array<vk::DescriptorSetLayoutBinding, 3> m_bindings;
-        std::array<vk::DescriptorBindingFlags, 3> m_binding_flags;
+        //TODO: update this because eUniformPool
+        std::array<vk::DescriptorPoolSize, 2> m_pool_sizes;
+        std::array<vk::DescriptorSetLayoutBinding, 2> m_bindings;
+        std::array<vk::DescriptorBindingFlags, 2> m_binding_flags;
         vk::DescriptorSetLayoutBindingFlagsCreateInfo m_binding_flags_info;
         
         const Vulkan::Context& m_context;
@@ -77,22 +79,25 @@ namespace Rendering::Vulkan
 
             m_pool_sizes[1].type = vk::DescriptorType::eStorageBuffer;
             m_pool_sizes[1].descriptorCount = 1000;
-
+            //TODO: see below about eUniformBuffer
+            /*
             m_pool_sizes[2].type = vk::DescriptorType::eUniformBuffer;
             m_pool_sizes[2].descriptorCount = 1000;
+            */
 
             m_pool_create_info.maxSets = 1; // For bindless, typically one large set
             m_pool_create_info.poolSizeCount = static_cast<uint32_t>(m_pool_sizes.size());
             m_pool_create_info.pPoolSizes = m_pool_sizes.data();
 
-            std::array<vk::DescriptorType, 3> types
+            std::array<vk::DescriptorType, 2> types
             {
                 vk::DescriptorType::eCombinedImageSampler,
-                vk::DescriptorType::eStorageBuffer,
-                vk::DescriptorType::eUniformBuffer
+                vk::DescriptorType::eStorageBuffer
+                //TODO: this causes a validation layer error. Why?
+                //vk::DescriptorType::eUniformBuffer
             };
 
-            for (uint32_t i = 0; i < 3; ++i)
+            for (uint32_t i = 0; i < 2; ++i)
             {
                 m_bindings[i].binding = i;
                 m_bindings[i].descriptorType = types[i];
@@ -102,18 +107,17 @@ namespace Rendering::Vulkan
             }
 
             m_binding_flags_info = vk::DescriptorSetLayoutBindingFlagsCreateInfo();
-            m_binding_flags_info.bindingCount = 3;
+            m_binding_flags_info.bindingCount = m_binding_flags.size();
             m_binding_flags_info.pBindingFlags = m_binding_flags.data();
 
             m_layout_create_info = vk::DescriptorSetLayoutCreateInfo();;
-            m_layout_create_info.bindingCount = 3;
+            m_layout_create_info.bindingCount = m_bindings.size();
             m_layout_create_info.pBindings = m_bindings.data();
             m_layout_create_info.flags = vk::DescriptorSetLayoutCreateFlagBits::eUpdateAfterBindPool;
             m_layout_create_info.pNext = &m_binding_flags_info;
 
             // Allocate descriptor set
             m_allocate_info = vk::DescriptorSetAllocateInfo();
-            m_allocate_info.descriptorPool = m_pool;
             m_allocate_info.descriptorSetCount = 1;
             m_allocate_info.pSetLayouts = &m_layout;
         }
