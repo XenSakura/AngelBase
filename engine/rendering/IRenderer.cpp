@@ -7,10 +7,6 @@ import std;
 import WindowManager;
 import VulkanContext;
 //the only file that should be accessed outside of rendering
-class TextureHandle;
-class MeshHandle;
-class MaterialHandle;
-class ShaderHandle;
 class MeshData;
 class MaterialProperties;
 class TextureDesc;
@@ -34,20 +30,7 @@ public:
     virtual void shutdown() = 0;
     virtual void resize(uint32_t width, uint32_t height) = 0;
     
-    // ===== Resource Management =====
-    virtual TextureHandle create_texture(const TextureDesc& desc) = 0;
-    virtual void destroy_texture(TextureHandle handle) = 0;
-    
-    virtual MeshHandle create_mesh(const MeshData& data) = 0;
-    virtual void destroy_mesh(MeshHandle handle) = 0;
-    
-    virtual MaterialHandle create_material(const MaterialProperties& props) = 0;
-    virtual void update_material(MaterialHandle handle, const MaterialProperties& props) = 0;
-    virtual void destroy_material(MaterialHandle handle) = 0;
-    
-    virtual ShaderHandle load_shader(std::string_view vertex_path, std::string_view fragment_path) = 0;
-    virtual void destroy_shader(ShaderHandle handle) = 0;
-    
+   
     // ===== Frame Rendering =====
     virtual void begin_frame() = 0;
     virtual void end_frame() = 0;

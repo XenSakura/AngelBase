@@ -7,6 +7,8 @@ import ServiceLocator;
 namespace Rendering::Vulkan
 {
     // bindless design
+    //TODO: Sakura, we're only using descriptors for the textures, otherwise buffer device address
+    //TODO: Descriptors are only used for ImageSamplers/textures so we need to refactor
     export class DescriptorManager: public ISystem
     {
     public:
@@ -17,33 +19,6 @@ namespace Rendering::Vulkan
         {
             initialize();
         }
-
-        vk::DescriptorPool& createDescriptorPool()
-        {
-            m_pool = m_context.device.createDescriptorPool(m_pool_create_info);
-            m_allocate_info.descriptorPool = m_pool;
-            return m_pool;
-        }
-
-        vk::DescriptorSetLayout& createDescriptorSetLayout()
-        {
-            m_layout = m_context.device.createDescriptorSetLayout(m_layout_create_info);
-            return m_layout;
-        }
-
-        vk::DescriptorSet& createDescriptorSet()
-        {
-            if (m_context.device.allocateDescriptorSets(&m_allocate_info, &m_set) != vk::Result::eSuccess)
-            {
-                assert(true && "Descriptor set failed to allocate");
-            }
-            return m_set;
-        }
-
-        vk::DescriptorSet& getDescriptorSet()
-        {
-            return m_set;    
-        }
         
         ~DescriptorManager()
         {
@@ -53,73 +28,82 @@ namespace Rendering::Vulkan
             
         }
     private:
-        //same here
-        vk::DescriptorPool m_pool;
         vk::DescriptorSetLayoutCreateInfo m_layout_create_info;
-        //we're going to need multiple
+        //we're going to need 1
         vk::DescriptorSetLayout m_layout;
-        vk::DescriptorSetAllocateInfo m_allocate_info;
-        vk::DescriptorSet m_set;
-        vk::DescriptorPoolCreateInfo m_pool_create_info;
-        //TODO: update this because eUniformPool
-        std::array<vk::DescriptorPoolSize, 2> m_pool_sizes;
-        std::array<vk::DescriptorSetLayoutBinding, 2> m_bindings;
-        std::array<vk::DescriptorBindingFlags, 2> m_binding_flags;
-        vk::DescriptorSetLayoutBindingFlagsCreateInfo m_binding_flags_info;
+       
+        vk::DescriptorBindingFlags m_binding_flags;
+        vk::DescriptorSetLayoutBindingFlagsCreateInfo m_desc_binding_flags_create_info;
+        vk::DescriptorSetLayoutBinding m_layout_binding;
+        
+        vk::DescriptorPool m_pool;
         
         const Vulkan::Context& m_context;
         void initialize()
         {
-            m_pool_create_info = vk::DescriptorPoolCreateInfo();
-            m_pool_create_info.flags = vk::DescriptorPoolCreateFlagBits::eUpdateAfterBind;
+            //only ever need one descriptor pool/set since the GPU will use it all
+            
+            // creating the descriptor set layouts just for the textures
+            m_binding_flags = vk::DescriptorBindingFlagBits::eVariableDescriptorCount;
 
-            //TODO: we need to figure out what exact pool sizes we need
-            m_pool_sizes[0].type = vk::DescriptorType::eCombinedImageSampler;
-            m_pool_sizes[0].descriptorCount = 1000;
+            m_desc_binding_flags_create_info.bindingCount = 1;
+            m_desc_binding_flags_create_info.pBindingFlags = &m_binding_flags;
+            
+            m_layout_binding.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+            //TODO: size of total textures
+            m_layout_binding.descriptorCount = 1;
+            m_layout_binding.stageFlags = vk::ShaderStageFlagBits::eFragment;
 
-            m_pool_sizes[1].type = vk::DescriptorType::eStorageBuffer;
-            m_pool_sizes[1].descriptorCount = 1000;
-            //TODO: see below about eUniformBuffer
-            /*
-            m_pool_sizes[2].type = vk::DescriptorType::eUniformBuffer;
-            m_pool_sizes[2].descriptorCount = 1000;
-            */
+            m_layout_create_info = vk::DescriptorSetLayoutCreateInfo();
+            m_layout_create_info.bindingCount = 1;
+            m_layout_create_info.pBindings = &m_layout_binding;
+            m_layout_create_info.pNext = &m_desc_binding_flags_create_info;
 
-            m_pool_create_info.maxSets = 1; // For bindless, typically one large set
-            m_pool_create_info.poolSizeCount = static_cast<uint32_t>(m_pool_sizes.size());
-            m_pool_create_info.pPoolSizes = m_pool_sizes.data();
-
-            std::array<vk::DescriptorType, 2> types
+            if (m_context.device.createDescriptorSetLayout(&m_layout_create_info, nullptr, &m_layout) != vk::Result::eSuccess)
             {
-                vk::DescriptorType::eCombinedImageSampler,
-                vk::DescriptorType::eStorageBuffer
-                //TODO: this causes a validation layer error. Why?
-                //vk::DescriptorType::eUniformBuffer
-            };
-
-            for (uint32_t i = 0; i < 2; ++i)
-            {
-                m_bindings[i].binding = i;
-                m_bindings[i].descriptorType = types[i];
-                m_bindings[i].descriptorCount = 1000;
-                m_bindings[i].stageFlags = vk::ShaderStageFlagBits::eAll;
-                m_binding_flags[i] = vk::DescriptorBindingFlagBits::eUpdateAfterBind;
+                assert(false && "failed to create descriptor set layout");
             }
 
-            m_binding_flags_info = vk::DescriptorSetLayoutBindingFlagsCreateInfo();
-            m_binding_flags_info.bindingCount = m_binding_flags.size();
-            m_binding_flags_info.pBindingFlags = m_binding_flags.data();
+            std::vector<vk::DescriptorPoolSize> poolSizes = {
+                // only allocate descriptors for images/ textures
+                vk::DescriptorPoolSize(vk::DescriptorType::eCombinedImageSampler, 1)
+            };
+            
 
-            m_layout_create_info = vk::DescriptorSetLayoutCreateInfo();;
-            m_layout_create_info.bindingCount = m_bindings.size();
-            m_layout_create_info.pBindings = m_bindings.data();
-            m_layout_create_info.flags = vk::DescriptorSetLayoutCreateFlagBits::eUpdateAfterBindPool;
-            m_layout_create_info.pNext = &m_binding_flags_info;
+            vk::DescriptorPoolCreateInfo poolCreateInfo = {};
+            poolCreateInfo.poolSizeCount = 1;
+            poolCreateInfo.pPoolSizes = poolSizes.data();
+            //TODO: not sure if this is correct
+            poolCreateInfo.maxSets = FRAMES;
 
-            // Allocate descriptor set
-            m_allocate_info = vk::DescriptorSetAllocateInfo();
-            m_allocate_info.descriptorSetCount = 1;
-            m_allocate_info.pSetLayouts = &m_layout;
+            if (m_context.device.createDescriptorPool(&poolCreateInfo, nullptr, &m_pool) != vk::Result::eSuccess)
+            {
+                assert(false && "failed to create descriptor pool");
+            }
+
+            //TODO: as above, texture size
+            uint32_t descriptor_count = 1;
+            vk::DescriptorSetVariableDescriptorCountAllocateInfo variable_desc_count_info = {};
+            variable_desc_count_info.descriptorSetCount = 1;
+            variable_desc_count_info.pDescriptorCounts = &descriptor_count;
+
+            vk::DescriptorSetAllocateInfo allocateInfo = {};
+            allocateInfo.descriptorPool = m_pool;
+            allocateInfo.pSetLayouts = &m_layout;
+            allocateInfo.descriptorSetCount = 1;
+            allocateInfo.pNext = &variable_desc_count_info;
+
+
+            vk::DescriptorSet set;
+            // Allocate descriptor set-- we are only allocating 1 for images
+            set = m_context.device.allocateDescriptorSets(allocateInfo)[0];
+
+            std::vector<vk::WriteDescriptorSet> write_descriptor_sets = {
+                //vk::WriteDescriptorSet(set, vk::DescriptorType::eCombinedImageSampler, 0, &Texture.sampler)
+            };
+
+            m_context.device.updateDescriptorSets(static_cast<uint32_t>(write_descriptor_sets.size()), write_descriptor_sets.data(), 0, nullptr);
+            
         }
     };
 }

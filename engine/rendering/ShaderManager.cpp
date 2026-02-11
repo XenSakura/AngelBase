@@ -63,8 +63,8 @@ namespace Rendering
             eSuccess,
             eFailedToOpen, //bad path
             eFailedToLoad, // failed to compile
-            eFailedToFindEntry, // wrong entry point
-            eFailedToComposeShader,// system error, log
+            //eFailedToFindEntry, // wrong entry point
+            //eFailedToComposeShader,// system error, log
             eFailedToLinkShader, //system error, log
             eFailedToGetSpirv //system error, log
         };
@@ -74,9 +74,10 @@ namespace Rendering
         {}
         ShaderError error;
         std::string name;
-        std::string entry_point;
-        vk::ShaderStageFlagBits stage;
-        std::vector<uint32_t>spirv_code;
+        std::string source;
+        ISlangBlob* spirv_code;
+        ShaderReflection reflection_data;
+        
         size_t source_hash;
         std::filesystem::file_time_type last_edited;
     };
@@ -91,36 +92,38 @@ namespace Rendering
             slang::createGlobalSession(global_session.writeRef());
             CompiledShaderCode.reserve(128);
         }
-
         
-        
-        /**
-         * 
-         */
         void initialize(const std::string& compiler_profile = "spirv_1_5", const slang::CompilerOptionEntry& entry = {})
         {
             slang::SessionDesc session_desc = {};
+            
             slang::TargetDesc target_desc = {};
             target_desc.format = SLANG_SPIRV;
             target_desc.profile = global_session->findProfile(compiler_profile.c_str());
 
             session_desc.targets = &target_desc;
-            session_desc.targetCount = 1;
+            session_desc.targetCount = static_cast<SlangInt>(1);
+            session_desc.defaultMatrixLayoutMode = SLANG_MATRIX_LAYOUT_COLUMN_MAJOR;
 
-            std::array<slang::CompilerOptionEntry, 1> options = 
-            {
-                {
+            std::array<slang::CompilerOptionEntry, 2> options = 
+            {{
+                slang::CompilerOptionEntry{
                     slang::CompilerOptionName::EmitSpirvDirectly,
-                    {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}
+                    slang::CompilerOptionValue{slang::CompilerOptionValueKind::Int, 1}
                 }
-            };
+            }};
             session_desc.compilerOptionEntries = options.data();
-            session_desc.compilerOptionEntryCount = options.size();
+            session_desc.compilerOptionEntryCount = static_cast<uint32_t>(options.size());
 
             Slang::ComPtr<slang::ISession> session = nullptr;
             global_session->createSession(session_desc, session.writeRef());
 
             slang_session = session;
+
+            if (!slang_session.get())
+            {
+                throw std::runtime_error("Failed to create slang session");
+            }
         }
 
         std::optional<std::string> readShaderSource(const std::string& path)
@@ -129,6 +132,7 @@ namespace Rendering
             if (!file.is_open())
             {
                 // Could log error here: "Failed to open shader file: " + path
+                assert(false && std::string("Failed to open shader file: " + path).c_str());
                 return std::nullopt;
             }
     
@@ -143,11 +147,14 @@ namespace Rendering
             return source;
         }
 
-        const CompiledShader& compileShader(const std::string& name, const std::string& directory, vk::ShaderStageFlagBits stage, const std::string& entry_name = "main")
+        CompiledShader compileShader(const std::string& name, const std::string& directory)
         {
+            //check to ensure it's a proper slang file and get the raw filename to save metadata
+            std::string raw_filename = stripSlangFileExtension(name);
+            
             Slang::ComPtr<slang::IModule> slang_module;
             
-            std::string updated_path = directory + "/" +  name + ".slang";
+            std::string updated_path = directory + "/" +  name;
             
             //1. Try to get shader source from path
             //TODO: Replace this with I/O handler
@@ -157,12 +164,11 @@ namespace Rendering
                 return CompiledShader(CompiledShader::eFailedToOpen);
             }
 
-            
             //2. Load shader module for compiling
             Slang::ComPtr<slang::IBlob> diagnostics_blob;
             {
                 slang_module = slang_session->loadModuleFromSourceString(
-                    name.c_str(),
+                    raw_filename.c_str(),
                     updated_path.c_str(),
                     // there is an option without src string but I think we should use this for now
                     // this allows us to change this out for our own I/O system who can get the relevant data without blocking.
@@ -171,83 +177,118 @@ namespace Rendering
                     diagnostics_blob.writeRef());
                 diagnoseIfNeeded(diagnostics_blob);
                 
-                if (!slang_module.get())
+                if (slang_module.get() == nullptr)
                 {
                     return CompiledShader(CompiledShader::eFailedToLoad);
                 }
             }
+            
 
-            Slang::ComPtr<slang::IEntryPoint> entry_point;
-            //3. get entry point 
-            {
-                slang_module->findEntryPointByName(entry_name.c_str(), entry_point.writeRef());
-                if (entry_point.get() == nullptr)
-                {
-                    return CompiledShader(CompiledShader::eFailedToFindEntry);
-                }
-            }
-
-            std::array<slang::IComponentType*, 2> component_types = { slang_module, entry_point };
-            Slang::ComPtr<slang::IComponentType> composed_program;
-            //4. Compose shader 
-            {
-                slang_session->createCompositeComponentType(
-                    component_types.data(),
-                    component_types.size(),
-                    composed_program.writeRef(),
-                    diagnostics_blob.writeRef());
-                diagnoseIfNeeded(diagnostics_blob);
-            }
-
-            if (composed_program.get() == nullptr)
-            {
-                return CompiledShader(CompiledShader::eFailedToLoad);
-            }
-
-            // sub step, handle reflection
-            ShaderReflection shader_reflection = getReflectionData(composed_program.get());
-            WriteJsonFile(name, directory + "/cache", shader_reflection.raw_json);
-
-            //5. Link shader
-            Slang::ComPtr<slang::IComponentType> linked_program;
-            composed_program->link(linked_program.writeRef(), diagnostics_blob.writeRef());
-
-            if (linked_program.get() == nullptr)
-            {
-                return CompiledShader(CompiledShader::eFailedToLinkShader);
-            }
-
-            //7. Get the Spir-V code
-            Slang::ComPtr<slang::IBlob> spir_v_code;
-            linked_program->getEntryPointCode(0, 0, spir_v_code.writeRef(), diagnostics_blob.writeRef());
+            //3. Get Target Code-- does all the steps for us
+            Slang::ComPtr<ISlangBlob> spirv;
+            slang_module->getTargetCode(0, spirv.writeRef(), diagnostics_blob.writeRef());
             diagnoseIfNeeded(diagnostics_blob);
-
-            if (spir_v_code.get() == nullptr)
+            if (spirv.get() == nullptr)
             {
                 return CompiledShader(CompiledShader::eFailedToGetSpirv);
             }
 
+            //Link Shader specifically for reflection
+            Slang::ComPtr<slang::IComponentType> linked_program;
+            slang_module.get()->link(linked_program.writeRef(), diagnostics_blob.writeRef());
+            if (linked_program.get() == nullptr)
+            {
+                return CompiledShader(CompiledShader::eFailedToLinkShader);
+            }
+            ShaderReflection shader_reflection = getReflectionData(slang_module);
+            writeJsonFile(raw_filename, directory + "/cache", shader_reflection.raw_json);
+
+            
+            //TODO:perhaps a simpler way to do this with GetTargetCode
+            
+            // Slang::ComPtr<slang::IEntryPoint> entry_point;
+            // //3. get entry point 
+            // {
+            //     slang_module->findEntryPointByName(entry_name.c_str(), entry_point.writeRef());
+            //     if (entry_point.get() == nullptr)
+            //     {
+            //         return CompiledShader(CompiledShader::eFailedToFindEntry);
+            //     }
+            // }
+            //
+            // std::array<slang::IComponentType*, 2> component_types = { slang_module, entry_point };
+            // Slang::ComPtr<slang::IComponentType> composed_program;
+            // //4. Compose shader 
+            // {
+            //     slang_session->createCompositeComponentType(
+            //         component_types.data(),
+            //         component_types.size(),
+            //         composed_program.writeRef(),
+            //         diagnostics_blob.writeRef());
+            //     diagnoseIfNeeded(diagnostics_blob);
+            // }
+            //
+            // if (composed_program.get() == nullptr)
+            // {
+            //     return CompiledShader(CompiledShader::eFailedToLoad);
+            // }
+            //
+            // // sub step, handle reflection
+            // ShaderReflection shader_reflection = getReflectionData(composed_program.get());
+            // WriteJsonFile(name, directory + "/cache", shader_reflection.raw_json);
+            //
+            // //5. Link shader
+            // Slang::ComPtr<slang::IComponentType> linked_program;
+            // composed_program->link(linked_program.writeRef(), diagnostics_blob.writeRef());
+            //
+            // if (linked_program.get() == nullptr)
+            // {
+            //     return CompiledShader(CompiledShader::eFailedToLinkShader);
+            // }
+            //
+            // //7. Get the Spir-V code
+            // Slang::ComPtr<slang::IBlob> spir_v_code;
+            // linked_program->getEntryPointCode(0, 0, spir_v_code.writeRef(), diagnostics_blob.writeRef());
+            // diagnoseIfNeeded(diagnostics_blob);
+            //
+            // if (spir_v_code.get() == nullptr)
+            // {
+            //     return CompiledShader(CompiledShader::eFailedToGetSpirv);
+            // }
+            //
             CompiledShader result = {};
             result.error = CompiledShader::eSuccess;
             result.name = name;
-            result.entry_point = entry_name;
-            result.stage = stage;
-
-            SaveSpirvToFile(spir_v_code, directory + "/cache",name);
-
-            //copying spirv code
-            const uint32_t* spirv_data = (const uint32_t*)spir_v_code->getBufferPointer();
-            size_t spirv_size = spir_v_code->getBufferSize() / sizeof(uint32_t);
-            result.spirv_code.assign(spirv_data, spirv_data + spirv_size);
+            result.source = source.value();
+            
+            result.spirv_code = spirv;
+            saveSpirvToFile(spirv, directory + "/cache",raw_filename);
+            
+            std::cout << source.value() << std::endl;
 
             CompiledShaderCode.emplace(result.name, std::move(result));
             
             return CompiledShaderCode[name];
         }
 
+        static std::string stripSlangFileExtension(const std::string& name)
+        {
+            std::string raw_name;
+            if (name.size() > 6 && name.substr(name.size() - 6) == ".slang")
+            {
+                raw_name = name.substr(0, name.size() - 6);
+            }
+            else
+            {
+                assert(false && "This file is not a shader file of the extension type .slang!");
+            }
+
+            return raw_name;
+        }
+
         //I'm not certain how useful this is-- we can always just cache the pipelines and descriptors
         // temp pasting of raw json
-        bool WriteJsonFile(const std::string& name, const std::string& path, const std::string& raw)
+        bool writeJsonFile(const std::string& raw_filename, const std::string& path, const std::string& raw)
         {
             std::filesystem::path p (path);
             if (!std::filesystem::exists(p))
@@ -257,7 +298,7 @@ namespace Rendering
                     return false;
                 }
             }
-            std::filesystem::path full_path = p / (name + ".json");
+            std::filesystem::path full_path = p / (raw_filename + ".json");
 
             std::ofstream file(full_path, std::ios::binary);
             if (!file.is_open())
@@ -271,10 +312,11 @@ namespace Rendering
             return true;
         }
 
-        bool SaveSpirvToFile(ISlangBlob* spir_v_code,
+        bool saveSpirvToFile(ISlangBlob* spir_v_code,
                      const std::string& output_dir,
-                     const std::string& filename)
+                     const std::string& raw_filename)
         {
+            
             namespace fs = std::filesystem;
     
             if (!spir_v_code) {
@@ -290,7 +332,7 @@ namespace Rendering
             }
             
             // Construct full file path
-            fs::path file_path = dir_path / (filename + ".spv");
+            fs::path file_path = dir_path / (raw_filename + ".spv");
     
             // Open file in binary mode
             std::ofstream file(file_path, std::ios::binary);
@@ -308,11 +350,8 @@ namespace Rendering
 
         CompiledShader recompileShader(const std::string& name, const std::string& path)
         {
-            
-            vk::ShaderStageFlagBits stage = CompiledShaderCode[name].stage;
-            std::string entry_point = CompiledShaderCode[name].entry_point;
             CompiledShaderCode.erase(name);
-            return compileShader(name, path, stage, entry_point);
+            return compileShader(name, path);
         }
     
         void clearCache()
@@ -324,7 +363,7 @@ namespace Rendering
         {
             if (diagnosticsBlob != nullptr)
             {
-                std::cout << static_cast<const char*>(diagnosticsBlob->getBufferPointer()) << std::endl;
+                std::cerr << static_cast<const char*>(diagnosticsBlob->getBufferPointer()) << std::endl;
             }
         }
 
@@ -334,21 +373,39 @@ namespace Rendering
          * @param name 
          * @return 
          */
-        vk::ShaderModule createVulkanShaderModule(vk::Device& device, const std::string& name)
+        vk::ShaderModule createVulkanShaderModule(const vk::Device& device, const std::string& name)
         {
             auto it = CompiledShaderCode.find(name);
             if (it == CompiledShaderCode.end()) return VK_NULL_HANDLE;
 
             vk::ShaderModuleCreateInfo createInfo = {};
-            createInfo.codeSize = it->second.spirv_code.size() * sizeof(uint32_t);
-            createInfo.pCode = it->second.spirv_code.data();
+            createInfo.codeSize = it->second.spirv_code->getBufferSize();
+            createInfo.pCode = static_cast<const uint32_t*>(it->second.spirv_code->getBufferPointer());
 
             vk::ShaderModule shaderModule = device.createShaderModule(createInfo);
             return shaderModule;
         }
 
-        ShaderReflection getReflectionData(slang::IComponentType* linkedProgram)
+        ShaderReflection getReflectionData(slang::IModule* module)
         {
+            
+            std::vector<slang::IComponentType*> components = {module};
+            
+            for (uint32_t i = 0; i < module->getDefinedEntryPointCount(); i++)
+            {
+                slang::IEntryPoint* point = nullptr;
+                module->getDefinedEntryPoint(i, &point);
+                components.emplace_back(point);
+            }
+
+            Slang::ComPtr<slang::IComponentType> composedProgram;
+            slang_session->createCompositeComponentType(
+                components.data(), components.size(),
+                composedProgram.writeRef());
+
+            Slang::ComPtr<slang::IComponentType> linkedProgram;
+            composedProgram->link(linkedProgram.writeRef());
+            
             ShaderReflection reflection = {};
             ISlangBlob* test;
             linkedProgram->getLayout()->toJson(&test);
@@ -360,10 +417,6 @@ namespace Rendering
             
             return reflection;
         }
-
-
-        
-
 
         ~ShaderManager()
         {

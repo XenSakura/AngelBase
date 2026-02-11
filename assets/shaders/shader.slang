@@ -1,44 +1,55 @@
-struct VertexInput
-{
-    float3 position : POSITION;
-    float3 color : COLOR;
+struct VSInput {
+    float3 Pos;
+    float3 Normal;
+    float2 UV;
 };
 
-struct VertexOutput
-{
-    float4 position : SV_Position;
-    float3 color : COLOR;
+Sampler2D textures[];
+
+struct ShaderData {
+    float4x4 projection;
+    float4x4 view;
+    float4x4 model[3];
+    float4 lightPos;
+    uint32_t selected;
 };
 
-cbuffer TransformBuffer
-{
-    float4x4 modelViewProj;
-    float time;
+struct VSOutput {
+    float4 Pos : SV_POSITION;
+    float3 Normal;
+    float2 UV;
+    float3 Factor;
+    float3 LightVec;
+    float3 ViewVec;
+    uint32_t InstanceIndex;
 };
 
-// Vertex Shader
 [shader("vertex")]
-VertexOutput main(VertexInput input)
-{
-    VertexOutput output;
-    
-    // Simple wave effect using time
-    float3 pos = input.position;
-    pos.y += sin(pos.x * 2.0 + time) * 0.1;
-    
-    output.position = mul(modelViewProj, float4(pos, 1.0));
-    output.color = input.color;
-    
+VSOutput main(VSInput input, uniform ShaderData *shaderData, uint instanceIndex : SV_InstanceID) {
+    VSOutput output;
+    float4x4 modelMat = shaderData->model[instanceIndex];
+    output.Normal = mul((float3x3)mul(shaderData->view, modelMat), input.Normal);
+    output.UV = input.UV;
+    output.Pos = mul(shaderData->projection, mul(shaderData->view, mul(modelMat, float4(input.Pos.xyz, 1.0))));
+    output.Factor = (shaderData->selected == instanceIndex ? 3.0f : 1.0f);
+    output.InstanceIndex = instanceIndex;
+    // Calculate view vectors required for lighting
+    float4 fragPos = mul(mul(shaderData->view, modelMat), float4(input.Pos.xyz, 1.0));
+    output.LightVec = shaderData->lightPos.xyz - fragPos.xyz;
+    output.ViewVec = -fragPos.xyz;
     return output;
 }
 
-// Fragment/Pixel Shader
 [shader("fragment")]
-float4 fragmentMain(VertexOutput input) : SV_Target
-{
-    // Simple color output with slight color variation based on position
-    float3 color = input.color;
-    color *= (sin(input.position.x * 0.01) * 0.1 + 0.9);
-    
-    return float4(color, 1.0);
+float4 main(VSOutput input) {
+    // Phong lighting
+    float3 N = normalize(input.Normal);
+    float3 L = normalize(input.LightVec);
+    float3 V = normalize(input.ViewVec);
+    float3 R = reflect(-L, N);
+    float3 diffuse = max(dot(N, L), 0.0025);
+    float3 specular = pow(max(dot(R, V), 0.0), 16.0) * 0.75;
+    // Sample from texture
+    float3 color = textures[input.InstanceIndex].Sample(input.UV).rgb * input.Factor;
+    return float4(diffuse * color.rgb + specular, 1.0);
 }

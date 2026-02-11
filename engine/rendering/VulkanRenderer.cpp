@@ -1,5 +1,7 @@
 ﻿module;
 
+#include "glm/glm.hpp"
+
 #define VULKAN_HPP_DISPATCH_LOADER_DYNAMIC 1
 #include <vulkan/vulkan.hpp>
 #include "vk_mem_alloc.h"
@@ -7,6 +9,7 @@
 #define GLFW_INCLUDE_NONE
 #include "assimp/Vertex.h"
 #include "GLFW/glfw3.h"
+#include "glm/vec3.hpp"
 
 
 export module VulkanRenderer;
@@ -48,8 +51,15 @@ namespace Rendering::Vulkan
 		}
 	};
 
+	struct Vertex
+	{
+		glm::vec3 pos;
+		glm::vec3 normal;
+		glm::vec2 uv;
+	};
+
 	
-	export class VulkanRenderer
+	export class VulkanRenderer : public ISystem
 	{
 	private:
 		Context m_context = Context();
@@ -411,6 +421,10 @@ namespace Rendering::Vulkan
 					frame_resources[i].fence = m_context.device.createFence(fence_info, nullptr);
 					frame_resources[i].semaphore = m_context.device.createSemaphore(semaphore_info, nullptr);
 				}
+			}
+
+			//10. Load relevant textures
+			{
 				
 			}
 
@@ -418,9 +432,6 @@ namespace Rendering::Vulkan
 			{
 				m_descriptor_manager = std::make_shared<DescriptorManager>(m_context);
 				ServiceLocator::Instance()->RegisterSystem<DescriptorManager>(m_descriptor_manager);
-				m_descriptor_manager.get()->createDescriptorPool();
-				m_descriptor_manager.get()->createDescriptorSetLayout();
-				m_descriptor_manager.get()->createDescriptorSet();
 				
 			}
 
@@ -428,44 +439,51 @@ namespace Rendering::Vulkan
 			{
 				Rendering::ShaderManager shaderManager;
 				shaderManager.initialize();
-				shaderManager.compileShader("shader","./assets/shaders/", vk::ShaderStageFlagBits::eFragment);
+				CompiledShader::ShaderError error = shaderManager.compileShader("shader.slang","../assets/shaders").error;
+				if (error != CompiledShader::ShaderError::eSuccess)
+				{
+					assert(false && "Failed to compile shader");
+				}
 			}
-
+			/*
 			//11. Build the pipelines
 			{
-				/*
+				m_pipeline_manager = std::make_shared<PipelineManager>(m_context);
+
+				vk::PushConstantRange pushConstantRange = {};
+				pushConstantRange.stageFlags = vk::ShaderStageFlagBits::eVertex;
+				pushConstantRange.size = sizeof(vk::DeviceAddress);
+				
 				// Create pipeline layout
-				{
-					auto layout = m_pipeline_manager.get()->createPipelineLayout(
-						"main_layout",
-						{m_descriptor_manager.get()->getDescriptorSet()},
-						{pushConstantRange}
-					);
-				}
+				auto layout = m_pipeline_manager.get()->createPipelineLayout(
+					"main_layout",
+					{m_descriptor_manager.get()->getDescriptorSet()},
+					{pushConstantRange}
+				);
 				
 
 				
-				{
-					auto render_target_manager = m_render_target_manager.get();
-					// Build pipeline
-					auto pipeline = m_pipeline_manager.get()->getBuilder()
-						.setPipelineType(PipelineManager::PipelineBuilder::PipelineType::Graphics)
-						.addShaderStage(vk::ShaderStageFlagBits::eVertex, vertShader)
-						.addShaderStage(vk::ShaderStageFlagBits::eFragment, fragShader)
-						.addVertexBinding(0, sizeof(Vertex))
-						.addVertexAttribute(0, 0, vk::Format::eR32G32B32Sfloat, offsetof(Vertex, pos))
-						.setLayout(layout)
-						.setColorFormats(render_target_manager->getColorRenderTarget().format)
-						.setDepthFormat(render_target_manager->getDepthRenderTarget().format)
-						.addDynamicState(vk::DynamicState::eViewport)
-						.addDynamicState(vk::DynamicState::eScissor)
-						.build();
-				}
+				auto render_target_manager = m_render_target_manager.get();
+				// Build pipeline
+				auto pipeline = m_pipeline_manager.get()->getBuilder()
+				                                  .setPipelineType(PipelineManager::PipelineBuilder::PipelineType::Graphics)
+				                                  .addShaderStage(vk::ShaderStageFlagBits::eVertex, vertShader)
+				                                  .addShaderStage(vk::ShaderStageFlagBits::eFragment, fragShader)
+				                                  .addVertexBinding(0, sizeof(Vertex))
+				                                  .addVertexAttribute(0, 0, vk::Format::eR32G32B32Sfloat, offsetof(Vertex, pos))
+				                                  .setLayout(layout)
+				                                  .setColorFormats(render_target_manager->getColorRenderTarget().format)
+				                                  .setDepthFormat(render_target_manager->getDepthRenderTarget().format)
+				                                  .addDynamicState(vk::DynamicState::eViewport)
+				                                  .addDynamicState(vk::DynamicState::eScissor)
+				                                  .build();
 
 				// Cache it
 				m_pipeline_manager.get()->cachePipeline("main_pipeline", pipeline, layout);
-				*/
+				
+				
 			}
+			*/
 #ifdef _DEBUG
 			//12. initialize imgui
 			{
@@ -494,6 +512,8 @@ namespace Rendering::Vulkan
 				m_context.device.destroyFence(frame_resources[i].fence);
 			}
 
+			//ServiceLocator::Instance()->Unregister<PipelineManager>();
+			//m_pipeline_manager.reset();
 			
 			ServiceLocator::Instance()->Unregister<DescriptorManager>();
 			m_descriptor_manager.reset();

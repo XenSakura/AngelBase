@@ -27,7 +27,7 @@ namespace Rendering::Vulkan
          * @param usage 
          * @return 
          */
-        RenderTarget& createRenderTarget(const vk::ImageAspectFlags::BitsType& test, const vk::Format& format, const vk::Extent3D& size, const vk::ImageUsageFlags& usage) const
+        RenderTarget createRenderTarget(const vk::ImageAspectFlags::BitsType& test, const vk::Format& format, const vk::Extent3D& size, const vk::ImageUsageFlags& usage) const
         {
             
             vk::ImageCreateInfo image_info = {};
