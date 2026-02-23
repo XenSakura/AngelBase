@@ -4,22 +4,34 @@
 export module FileLoaderSystem;
 import std;
 import allocator;
-//TODO: Make async
 namespace AngelBase::Core
 {
+    export struct LoadResult
+    {
+        std::string filepath;
+        std::vector<unsigned char> data;
+        bool success;
+        std::string errorMessage;
+            
+    };
+        
+    export struct LoadRequest
+    {
+        std::string filepath;
+        std::function<void(LoadResult)> callback;
+    };
+
+
+    
     // Handles multiple requests from multiple threads at once, and outputs loaded memory one at a time
     export class FileLoaderSystem
     {
     public:
-        struct LoadRequest
-        {
-            std::string filepath;
-            std::atomic<bool>* completed;
-            std::vector<unsigned char>* result_binary;
-        };
+        
         
         FileLoaderSystem()
-            :requests(1000)
+            :workers(8), requests(2000)
+            
         {
 
             for (auto& worker : workers)
@@ -32,7 +44,7 @@ namespace AngelBase::Core
          * This request MUST happen
          * @param req 
          */
-        void submitLoadRequests(LoadRequest& req)
+        void submitLoadRequests(LoadRequest&& req)
         {
             requests.push(req);
         }
@@ -41,7 +53,7 @@ namespace AngelBase::Core
          * this request doesn't need to happen urgently, fail if it doesn't happen
          * @param req 
          */
-        bool try_submitLoadRequests(LoadRequest& req)
+        bool try_submitLoadRequests(LoadRequest&& req)
         {
             return requests.try_push(req);
         }
@@ -58,6 +70,7 @@ namespace AngelBase::Core
             }
         }
         
+    private:
         static std::vector<unsigned char> Load(const std::string& filepath)
         {
             std::ifstream file(filepath, std::ios::binary);
@@ -76,12 +89,13 @@ namespace AngelBase::Core
     
             return buffer;
         }
-    private:
+        
         std::vector<std::thread> workers;
 
         std::atomic<bool> _shutdown = false;
         rigtorp::mpmc::Queue<LoadRequest> requests;
-        
+
+        // for now we will just make blocking IO on these threads... should be okay.
         void ProcessLoadRequests()
         {
             DWORD_PTR mask = 1ULL << coreId;
@@ -97,17 +111,8 @@ namespace AngelBase::Core
                     // Perform the I/O operation
                     auto data = Load(request.filepath);
                     
-                    // Store result
-                    if (request.result_binary)
-                    {
-                        *request.result_binary = std::move(data);
-                    }
-                    
-                    // Signal completion
-                    if (request.completed)
-                    {
-                        request.completed->store(true, std::memory_order_release);
-                    }
+                    // now finish
+                    request.callback(LoadResult{request.filepath, data, true});
                 }
                 else
                 {
@@ -117,5 +122,7 @@ namespace AngelBase::Core
             }
         }
         unsigned int coreId = 7;
+
+        Allocator::ArenaAllocator<1024 * 1024 * 1024> buffer;
     };
 }

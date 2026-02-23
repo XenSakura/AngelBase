@@ -8,62 +8,10 @@ import std;
 
 namespace AngelBase::Allocator
 {
-    template <typename T>
-    concept Allocator = requires(T alloc, size_t size, size_t alignment, void* ptr)
-    {
-        { alloc.Allocate(size, alignment) } -> std::same_as<void*>;
-        { alloc.Deallocate(ptr) } -> std::same_as<void>;
-        { alloc.Reset() } -> std::same_as<void>;
-        { alloc.GetUsedMemory() } -> std::same_as<size_t>;
-        { alloc.GetTotalMemory() } -> std::same_as<size_t>;
-    };
     static constexpr unsigned char DEAD_MEMORY = 0xDD;
     static constexpr unsigned char CLEAN_MEMORY = 0xCD;
 
-    /**
-     * Calculate how many padding bytes are needed to align an address.
-     * 
-     * Alignment requirements ensure data sits at addresses that are multiples
-     * of its alignment value. For example:
-     * - 8-byte alignment means address must be divisible by 8 (0, 8, 16, 24...)
-     * - 16-byte alignment means address must be divisible by 16 (0, 16, 32, 48...)
-     * 
-     * @param address - The current memory address (as integer)
-     * @param alignment - Required alignment (must be power of 2: 1, 2, 4, 8, 16, etc.)
-     * @return Number of bytes to add to reach next aligned address
-     * 
-     * Example: address=13, alignment=8
-     *   - 13 % 8 = 5 (we're 5 bytes past the last aligned address)
-     *   - Need to skip 3 more bytes to reach 16 (next multiple of 8)
-     *   - Returns 3
-     */
-    inline size_t calculate_padding(uintptr_t address, size_t alignment)
-    {
-        // Find how far past the last aligned boundary we are
-        size_t remainder = address % alignment;
-    
-        // If already aligned (remainder is 0), no padding needed
-        if (remainder == 0)
-        {
-            return 0;
-        }
-    
-        // Otherwise, padding = bytes needed to reach next alignment boundary
-        // Example: if remainder is 5 and alignment is 8, padding is 8-5=3
-        size_t padding = alignment - remainder;
-    
-        return padding;
-    }
 
-    /**
-     * Overload that accepts a pointer instead of raw address.
-     * Converts pointer to integer address and calculates padding.
-     */
-    inline size_t calculate_padding(void* ptr, size_t alignment)
-    {
-        uintptr_t address = reinterpret_cast<uintptr_t>(ptr);
-        return calculate_padding(address, alignment);
-    }
     
     namespace Generic
     {
@@ -301,12 +249,18 @@ namespace AngelBase::Allocator
                 other.total_count = 0;
             }
 
-            TypedView<T> allocate(size_t size)
+            TypedView<T> allocate(size_t size = 1)
             {
                 assert(count + size <= total_count && "Allocation is too big for pool.");
                 TypedView<T> view(elements + count, size);
                 count += size;
                 return view;
+            }
+
+            void deallocate(TypedView<T> view)
+            {
+                size_t size = view.count;
+                
             }
 
             TypedView<T> getPool()
@@ -326,182 +280,18 @@ namespace AngelBase::Allocator
         
         
     }
-
-    namespace Atomic
-    {
-     
-    }
     
-    
-    // STL allocator
-    export template <typename T>
-    class allocator
-    {
-    public:
-        using value_type = T;
-        
-        allocator() noexcept = default;
-        
-
-        template<typename U>
-        constexpr allocator(const allocator<U>&) noexcept {}
-
-        virtual T* allocate(std::size_t n) = 0;
-
-        virtual void deallocate(T* p, std::size_t n) noexcept = 0;
-    private:
-    };
-
-    export class IAllocator {
-    public:
-        virtual ~IAllocator() = default;
-    
-        virtual void* Allocate(size_t size, size_t alignment = 16) = 0;
-        virtual void Deallocate(void* ptr) = 0;
-        virtual void Reset() = 0;
-    
-        virtual size_t GetUsedMemory() const = 0;
-        virtual size_t GetTotalMemory() const = 0;
-    
-        const char* GetName() const { return m_name; }
-    
-    protected:
-        IAllocator(const char* name) : m_name(name) {}
-        const char* m_name;
-    };
-
-    //used for RAII types
-    export template <typename T>
-    class STLAllocator : allocator<T>
-    {
-    public:
-        using value_type = T;
-        
-        
-        STLAllocator() noexcept = default;
-        
-
-        template<typename U>
-        constexpr STLAllocator(const STLAllocator<U>&) noexcept {}
-
-        T* allocate(std::size_t n) override
-        {
-            if (n > (std::size_t(-1) / sizeof(T)))
-            {
-                throw std::bad_alloc{};
-            }
-            if (auto p = static_cast<T*>(::operator new(sizeof(T) * n)))
-            {
-                return p;
-            }
-            throw std::bad_alloc{};
-        }
-
-        void deallocate(T* p, std::size_t n) noexcept override
-        {
-            ::operator delete(p);
-        }
-    private:
-    };
-
-    /**
-     * Memory in bytes
-     * @tparam size 
-     */
-    export template <size_t size>
-    class ArenaAllocator
-    {
-        char* memory;
-        size_t remaining_memory;
-        char* current;
-        
-        struct WrapperBase
-        {
-            WrapperBase* next;
-            WrapperBase* prev;
-        };
-    
-        
-        template <typename T>
-        struct TWrapper : WrapperBase
-        {
-            T object;  
-        };
-    
-        WrapperBase* allocatedList;  
-        
-
-        size_t allocatedCount;
-    public:
-        ArenaAllocator() noexcept
-        {
-            memory = new char[size];
-            remaining_memory = size;
-            current = memory;
-            allocatedList = nullptr;
-            allocatedCount = 0;
-        }
-        ~ArenaAllocator()
-        {
-            delete[] memory;
-        }
-
-        template <typename T>
-        T* allocate()
-        {
-            size_t wrapper_size = sizeof(TWrapper<T>);
-            size_t alignment = alignof(TWrapper<T>);
-    
-            // Calculate padding needed to align current pointer (not memory!)
-            size_t padding = calculate_padding(current, alignment);
-            size_t total_size = padding + wrapper_size;
-    
-            assert(remaining_memory >= total_size && "Not enough memory in pool");
-
-            // Apply padding to align current pointer
-            current += padding;
-    
-            // Place TWrapper in arena (now properly aligned)
-            TWrapper<T>* wrapper = reinterpret_cast<TWrapper<T>*>(current);
-            wrapper->memory = &(wrapper->object);  // Point to the object member
-            wrapper->next = allocatedList;
-            wrapper->prev = nullptr;
-
-            if (allocatedList)
-                allocatedList->prev = wrapper;
-
-            // Set to head of new list
-            allocatedList = wrapper;
-    
-            // Update tracking
-            remaining_memory -= total_size;
-    
-            // Move cursor past the wrapper
-            current += wrapper_size;
-    
-            return &(wrapper->object);
-        }
-
-        template <typename T>
-        void deallocate(T* pointer)
-        {
-            assert (pointer != nullptr && "Invalid memory to free");
-            
-        }
-    private:
-    };
     // temp memory for the frame only-- should never use with persistent memory
     export template <size_t Size>
-    class FrameAllocator
+    class ArenaAllocator
     {
         void* m_start;
         void* m_current;
         size_t m_used;
         size_t m_size;
-        std::string_view m_name = "FrameAllocator";
+        std::string_view m_name = "ArenaAllocator";
 
 #ifdef _DEBUG
-        
         
         struct AllocationInfo
         {
@@ -518,7 +308,7 @@ namespace AngelBase::Allocator
         std::vector<AllocationInfo> m_allocations;
 #endif
     public:
-        explicit FrameAllocator()
+        explicit ArenaAllocator()
             :m_used(0),
              m_size(Size)
         {
@@ -547,15 +337,10 @@ namespace AngelBase::Allocator
             }
             
             size_t totalOffset = padding + (obj_size * n);
-            std::cout << "Total offset: " << totalOffset << "\n";
-
             
             char* start_char = static_cast<char*>(m_start);
             char* current_char = static_cast<char*>(m_current);
             
-            void* printed_address_end = start_char + m_size;
-            void* printed_address_attempted = current_char + totalOffset;
-            std::cout << "Compare: " << printed_address_end << " and " << printed_address_attempted << "\n";
             
             // if we're trying to allocate past where we're allowed to
             if ((start_char + m_size) < (current_char + totalOffset))
@@ -602,42 +387,5 @@ namespace AngelBase::Allocator
 
         size_t GetUsed() const { return m_used; }
     };
-
     
-    
-
-    export enum class MemoryType
-    {
-        Stack,
-        Pool,
-        Slab
-    };
-    
-    export class GeneralAllocator 
-    {
-        const unsigned int FRAMES = 2;
-        
-    public:
-        GeneralAllocator()
-        {
-            // make an allocator for engine STL needs and systems
-        }
-
-        struct MemoryPoolInfo
-        {
-            const char* name;
-            unsigned int budget;
-            MemoryType type;
-            
-        };
-
-        void SetMemoryPoolsAndBudgets(const std::vector<MemoryPoolInfo>& pool_info)
-        {
-            
-        }
-
-    private:
-        std::vector<MemoryPoolInfo> pools_and_info;
-        
-    };
 }
