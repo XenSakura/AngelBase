@@ -21,9 +21,9 @@ export namespace Rendering::Vulkan
         vk::PhysicalDevice physical_device;
         vk::Queue graphics_queue;
         vk::SurfaceKHR surface;
-        VmaAllocator allocator;
+        VmaAllocator vram_allocator;
         int32_t graphics_queue_index = -1;
-
+        int32_t transfer_queue_index = -1;
         std::vector<vk::Semaphore> rendering_semaphores;
     };
 

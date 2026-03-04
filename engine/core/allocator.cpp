@@ -34,9 +34,9 @@ namespace AngelBase::Allocator
                 //by default 512 bytes-- leave room to keep track of next free memory
                 char data[size_of_block];
             };
-            constexpr size_t block_size = size_of_block;
-            constexpr size_t pool_size = size_of_pool;
-            constexpr size_t total_objects = size_of_pool / size_of_block;
+            size_t block_size = size_of_block;
+            size_t pool_size = size_of_pool;
+            size_t total_objects = size_of_pool / size_of_block;
             GenericObject* poolMemory;
             // no memory leaks-- ensure all is  freed
             GenericObject* allocatedList;

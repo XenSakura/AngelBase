@@ -6,7 +6,7 @@ module;
 export module ResourceManager;
 
 import VulkanContext;
-
+import ServiceLocator;
 export using glTFVertex = Assimp::Vertex;
 
 namespace Rendering::Vulkan
@@ -14,7 +14,7 @@ namespace Rendering::Vulkan
     //temp
     Context m_context;
     
-    export class ResourceManager
+    export class ResourceManager : public ISystem
     {
         
         std::weak_ptr<std::vector<glTFVertex>> model_vertices_data;
@@ -38,7 +38,7 @@ namespace Rendering::Vulkan
             vk::Buffer vBuffer{};
             VmaAllocation vBufferAllocation {};
             //buffer for uploading model textures to VRAM
-            vmaCreateBuffer(m_context.allocator, 
+            vmaCreateBuffer(m_context.vram_allocator, 
                 reinterpret_cast<VkBufferCreateInfo*>(&buffer_create_info), 
                 &bufferAllocInfo, 
                 reinterpret_cast<VkBuffer*>(&vBuffer), 
@@ -46,10 +46,10 @@ namespace Rendering::Vulkan
 
             void * bufferPtr {nullptr};
 
-            vmaMapMemory(m_context.allocator, vBufferAllocation, &bufferPtr);
+            vmaMapMemory(m_context.vram_allocator, vBufferAllocation, &bufferPtr);
             memcpy(bufferPtr, model_vertices_data.lock().get()->data(), vBufSize);
             memcpy(static_cast<char*>(bufferPtr) + vBufSize, model_indices_data.lock().get()->data(), iBufSize );
-            vmaUnmapMemory(m_context.allocator, vBufferAllocation);
+            vmaUnmapMemory(m_context.vram_allocator, vBufferAllocation);
         }
     };
 }

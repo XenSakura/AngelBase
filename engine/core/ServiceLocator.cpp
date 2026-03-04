@@ -25,7 +25,11 @@ public:
     template <typename SystemType>
     bool RegisterSystem(std::shared_ptr<SystemType>& system)
     {
-        auto [iter, inserted] = systems.insert({ typeid(SystemType), system });
+        static_assert(std::derived_from<SystemType, ISystem> == true);
+        auto [iter, inserted] = systems.insert({ 
+            std::type_index(typeid(SystemType)), 
+            std::weak_ptr(system) 
+        });
 
         if (!inserted)
         {
@@ -40,6 +44,7 @@ public:
     template<class SystemType>
     std::weak_ptr<SystemType> Get()
     {
+        static_assert(std::derived_from<SystemType, ISystem> == true);
         return GetSystem<SystemType>();
     }
 
@@ -101,6 +106,6 @@ private:
             assert(!expiry);
         }
         
-        return std::weak_ptr<SystemType>(std::static_pointer_cast<SystemType>(requested_system.lock()));
+        return std::weak_ptr<SystemType>(std::reinterpret_pointer_cast<SystemType>(requested_system.lock()));
     }
 };

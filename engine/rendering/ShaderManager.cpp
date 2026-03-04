@@ -11,6 +11,8 @@ export module ShaderManager;
 
 import std;
 import JsonParser;
+import ServiceLocator;
+
 namespace Rendering
 {
 
@@ -84,7 +86,7 @@ namespace Rendering
     /**
      * TODO: Deprecate this class and use a dedicated pipeline manager. for now this will handle File I/O and compiling shaders
      */
-    export class ShaderManager
+    export class ShaderManager : public ISystem
     {
     public:
         ShaderManager()

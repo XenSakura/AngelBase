@@ -18,51 +18,17 @@ namespace JobSystem
         High,
         Critical
     };
-    /**
-     * Internal implementation details 
-     */
-    namespace Internal
-    {
-        /**
-         * Interface used for containers to hold Jobs
-         */
-        struct JobInterface
-        {
-            virtual ~JobInterface() = default;
-            /**
-             * 
-             * @return return type of the executed task
-             */
-            virtual auto Execute() = 0;
-        };
 
-        /**
-         * CRTP interface for job system-- calls each derived job's execute in order to capture scope information.
-         * @tparam Derived derived class for each possible job that exists
-         */
-        template <typename Derived>
-        struct JobWrapper : JobInterface
-        {
-            /**
-             * Executes the job
-             * @return return type of the executed task
-             */
-            inline auto Execute() override final
-            {
-                return static_cast<Derived*>(this)->execute();
-            }
-        };
-        
-    }
-
+    // not able to be stored in stuff
     /**
      * Type used for submitting functions for the Job System to do \n
      *  \b Usage: Job{"name", name, i, "sample_argument", &referenced_argument } 
      * @tparam Func type of the function submitted
      * @tparam Args variadic arguments-- use to submit as any arguments as the function takes
      */
+    //rethink how we handle this
     export template <typename Func, typename... Args>
-    struct Job : Internal::JobWrapper<Job<Func, Args...>>
+    struct Job
     {
         /**
          * \b Usage: Job{"name", name, i, "sample_argument", &referenced_argument } \n
@@ -129,10 +95,9 @@ namespace JobSystem
      * Used by worker threads to execute a job I think
      * @param job -- job to be executed
      */
-    void ExecuteJob(JobSystem::Internal::JobInterface&& job)
+    template <typename Func, typename... Args>
+    void ExecuteJob(Job<Func, Args...>&& job)
     {
-        // i guess push result to the spot in the queue where it was done or...?
         job.Execute();
     }
-
 }

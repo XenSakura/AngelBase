@@ -18,16 +18,16 @@ namespace Atomics
         CounterInternal* internal;
     public:
         // Default constructor - allocates new internal state
-        Counter() : internal(new CounterInternal()) {}
+        Counter() noexcept : internal(new CounterInternal()) {}
 
         //when copying, increment usages
-        Counter(const Counter& rhs) :internal(rhs.internal)
+        Counter(const Counter& rhs) noexcept :internal(rhs.internal)
         {
             internal->ref_counter.fetch_add(1, std::memory_order_relaxed);
         };
     
         // Copy assignment operator
-        Counter& operator=(const Counter& rhs)
+        Counter& operator=(const Counter& rhs) noexcept
         {
             if (this != &rhs)
             {

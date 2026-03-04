@@ -2,9 +2,11 @@
 
 #include "glm/glm.hpp"
 
+
 #define VULKAN_HPP_DISPATCH_LOADER_DYNAMIC 1
 #include <vulkan/vulkan.hpp>
 #include "vk_mem_alloc.h"
+
 
 #define GLFW_INCLUDE_NONE
 #include "assimp/Vertex.h"
@@ -25,9 +27,8 @@ import VulkanDescriptors;
 import ServiceLocator;
 import ShaderManager;
 import VulkanPipeline;
+
 VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
-
-
 
 namespace Rendering::Vulkan
 {
@@ -178,7 +179,13 @@ namespace Rendering::Vulkan
 						const auto& family = queue_families[i];
 						const bool has_graphics = static_cast<bool>(family.queueFlags & vk::QueueFlagBits::eGraphics);
 						const bool has_present = device.getSurfaceSupportKHR(static_cast<uint32_t>(i), m_context.surface);
-
+						const bool has_transfer = static_cast<bool>(family.queueFlags & vk::QueueFlagBits::eTransfer);
+						if (has_transfer & !has_graphics)
+						{
+							m_context.transfer_queue_index = static_cast<int32_t>(i);
+							continue;
+						}
+						
 						if (has_graphics && has_present)
 						{
 							m_context.graphics_queue_index = static_cast<int32_t>(i);
@@ -355,11 +362,11 @@ namespace Rendering::Vulkan
 				allocator_info.instance = m_context.instance;
 				allocator_info.device = m_context.device;
 				allocator_info.flags= VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
-				vmaCreateAllocator(&allocator_info, &m_context.allocator);
+				vmaCreateAllocator(&allocator_info, &m_context.vram_allocator);
 
 				m_destructor.push([&]()
 				{
-					vmaDestroyAllocator(m_context.allocator);
+					vmaDestroyAllocator(m_context.vram_allocator);
 				});
 			}
 
@@ -406,7 +413,9 @@ namespace Rendering::Vulkan
 			{
 				m_command_pool_manager = std::make_shared<CommandPoolManager>(m_context);
 				ServiceLocator::Instance()->RegisterSystem<CommandPoolManager>(m_command_pool_manager);
-				m_command_pool_manager.get()->BuildCommandPools();
+				auto manager = m_command_pool_manager.get();
+				manager->BuildRenderCommandStructures();
+				manager->BuildTransferCommandStructures();
 			}
 
 			//9. Build Sync Structures

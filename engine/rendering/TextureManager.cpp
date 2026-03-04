@@ -1,4 +1,5 @@
 module;
+#include <simdjson/internal/instruction_set.h>
 #include <vulkan/vulkan.hpp>
 #include "stb_image.h"
 #include "vk_mem_alloc.h"
@@ -9,19 +10,20 @@ import FileLoaderSystem;
 import ServiceLocator;
 import Atomics;
 
+#define DEFAULT_TEXTURE_SIZE 512
 
 //TODO: have this happen async
 namespace Rendering
 {
-    export class TextureManager
+    export class TextureManager : public ISystem
     {
     public:
         TextureManager() = delete;
         TextureManager(const Vulkan::Context& context)
             :m_context(context),
-            current_texture_index(0)
+            current_texture_index(0),
+            raw_texture_data(32, std::vector<unsigned char>(DEFAULT_TEXTURE_SIZE * DEFAULT_TEXTURE_SIZE))
         {
-            raw_texture_data.reserve(1024);
         }
 
         void loadAllPaths()
@@ -34,32 +36,20 @@ namespace Rendering
             //increment index and reserve the slot to prevent invalidation
             size_t index = current_texture_index++;
             raw_texture_data.emplace_back();
-            
-            texture_counter.increment();
-            Atomics::Counter local_counter = texture_counter;
-
-            auto fs = ServiceLocator::Instance()->Get<AngelBase::Core::FileLoaderSystem>().lock().get();
-            fs->submitLoadRequests({path,[local_counter, this, index](AngelBase::Core::LoadResult l) mutable
             {
-                if (l.success)
-                {
-                    int x, y, channels;
-                    unsigned char * image = stbi_load_from_memory(l.data.data(),l.data.size(), &x, &y, &channels, 4);
-
-                    if (!image)
-                        return;
-
-                    std::vector<unsigned char> imageData(image, image + x * y * channels);
-                    raw_texture_data[index] = std::move(imageData);
-                    stbi_image_free(image);
-
-                    local_counter.decrement();
-                }
-                else
-                {
-                    local_counter.decrement();
-                }
-            }});
+                auto fs = ServiceLocator::Instance()->Get<AngelBase::Core::FileLoaderSystem>().lock().get();
+                AngelBase::Core::AsyncRequestHandle h =  fs->asyncReadFile(
+                    path, 
+                    raw_texture_data[index].data(), 
+                    DEFAULT_TEXTURE_SIZE,
+                    AngelBase::Core::AsyncFilePriority::Critical, 
+                    texture_counter, 
+                    nullptr);
+                
+                texture_metadata.push_back(h);
+            }
+            
+            return index;
         }
 
         void UploadTexturesToVRAM()
@@ -73,7 +63,7 @@ namespace Rendering
                 // .tga?
                 texImgCI.format = vk::Format::eB8G8R8A8Unorm;
                 // not correct we need to look at the base width and height of textures
-                texImgCI.extent = vk::Extent3D{2048, 2048, 1};
+                texImgCI.extent = vk::Extent3D{DEFAULT_TEXTURE_SIZE, DEFAULT_TEXTURE_SIZE, 1};
                 // ? format dependent methinks
                 texImgCI.mipLevels = 1;
                 texImgCI.samples = vk::SampleCountFlagBits::e1;
@@ -84,9 +74,11 @@ namespace Rendering
                 VmaAllocationCreateInfo texImageAllocCI {};
                 texImageAllocCI.usage = VMA_MEMORY_USAGE_AUTO;
 
-                vmaCreateImage(m_context.allocator,
-                    reinterpret_cast<VkImageCreateInfo*>(&texImgCI), &texImageAllocCI,
-                    reinterpret_cast<VkImage*>(&textures[i].image), &textures[i].allocation,
+                vmaCreateImage(m_context.vram_allocator,
+                    reinterpret_cast<VkImageCreateInfo*>(&texImgCI), 
+                    &texImageAllocCI,
+                    reinterpret_cast<VkImage*>(&textures[i].image), 
+                    &textures[i].allocation,
                     nullptr);
 
                 vk::ImageViewCreateInfo texViewCI{};
@@ -112,7 +104,7 @@ namespace Rendering
                 imgSrcAllocCI.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
                 imgSrcAllocCI.usage = VMA_MEMORY_USAGE_AUTO;
 
-                if (vmaCreateBuffer(m_context.allocator, reinterpret_cast<VkBufferCreateInfo*>(&bufferCI),
+                if (vmaCreateBuffer(m_context.vram_allocator, reinterpret_cast<VkBufferCreateInfo*>(&bufferCI),
                     &imgSrcAllocCI, reinterpret_cast<VkBuffer*>(&image_source_buffer),
                     &image_source_allocation, nullptr) != VK_SUCCESS)
                 {
@@ -120,7 +112,7 @@ namespace Rendering
                 }
 
                 void * imgSrcBufferPtr{nullptr};
-                vmaMapMemory(m_context.allocator, image_source_allocation, &imgSrcBufferPtr);
+                vmaMapMemory(m_context.vram_allocator, image_source_allocation, &imgSrcBufferPtr);
                 memcpy(imgSrcBufferPtr, raw_texture_data[i].data(), raw_texture_data[i].size());
             }
             //next upload commands to upload all of these to GPU
@@ -133,6 +125,7 @@ namespace Rendering
         Atomics::Counter texture_counter;
         const Vulkan::Context& m_context;
         std::vector<std::vector<unsigned char>> raw_texture_data;
+        std::vector<AngelBase::Core::AsyncRequestHandle> texture_metadata;
         struct VulkanImage
         {
             vk::Image image;

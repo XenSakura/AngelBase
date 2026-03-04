@@ -54,7 +54,7 @@ namespace Rendering::Vulkan
             t.format = format;
             t.extent = size;
             VkImage local_image;
-            vmaCreateImage(context.allocator, image_info, &alloc_info, &local_image, &t.allocation, nullptr);
+            vmaCreateImage(context.vram_allocator, image_info, &alloc_info, &local_image, &t.allocation, nullptr);
             t.image = local_image;
 
 
@@ -83,11 +83,11 @@ namespace Rendering::Vulkan
             if (draw_color_target.view != VK_NULL_HANDLE)
                 context.device.destroyImageView(draw_color_target.view);
             if (draw_color_target.image != VK_NULL_HANDLE)
-                vmaDestroyImage(context.allocator, draw_color_target.image, draw_color_target.allocation);
+                vmaDestroyImage(context.vram_allocator, draw_color_target.image, draw_color_target.allocation);
             if (draw_depth_target.view != VK_NULL_HANDLE)
                 context.device.destroyImageView(draw_depth_target.view);
             if (draw_depth_target.image != VK_NULL_HANDLE)
-                vmaDestroyImage(context.allocator, draw_depth_target.image, draw_depth_target.allocation);
+                vmaDestroyImage(context.vram_allocator, draw_depth_target.image, draw_depth_target.allocation);
         }
         RenderTargetManager() = delete;
         RenderTargetManager(const RenderTargetManager&) = delete;

@@ -10,7 +10,6 @@ project(AngelBase VERSION 0.1 LANGUAGES C CXX)
 find_package(Vulkan REQUIRED)
 
 
-#Using C++ 23 for modern features
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 

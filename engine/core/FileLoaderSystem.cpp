@@ -1,61 +1,64 @@
 ﻿module;
 #include "MPMCQueue.h"
 #include <windows.h>
+#include "atomic"
 export module FileLoaderSystem;
+
 import std;
-import allocator;
+import ServiceLocator;
+import Atomics;
+
+class TextureManager;
+
 namespace AngelBase::Core
 {
-    export struct LoadResult
-    {
-        std::string filepath;
-        std::vector<unsigned char> data;
-        bool success;
-        std::string errorMessage;
-            
-    };
-        
-    export struct LoadRequest
-    {
-        std::string filepath;
-        std::function<void(LoadResult)> callback;
-    };
-
-
     
+    export enum class AsyncFilePriority : uint32_t
+    {
+        Critical = 0,
+        High = 1,
+        Normal = 2,
+        Low = 3
+    };
+    
+    export enum class AsyncFileResult :uint16_t
+    {
+        Pending = 0,
+        Success = 1,
+        Failed = 2
+    };
+    
+    export using AsyncFileHandle = FILE*;
+        
+    export using AsyncFileBuffer = uint8_t*;
+
+    export struct AsyncRequestHandle
+    {
+        const char * path;
+        AsyncFileHandle handle;
+        AsyncFileBuffer buffer;
+        size_t buffer_size;
+        size_t actual_size;
+        AsyncFilePriority priority;
+        void (*callback) (AsyncRequestHandle);
+        Atomics::Counter dependent_on;
+        std::shared_ptr<std::atomic<AsyncFileResult>> result;
+    };
+
     // Handles multiple requests from multiple threads at once, and outputs loaded memory one at a time
-    export class FileLoaderSystem
+    export class FileLoaderSystem : public ISystem
     {
     public:
         
-        
         FileLoaderSystem()
-            :workers(8), requests(2000)
+            :workers(8), criticalRequests(100), highRequests(100), normalRequests(100), lowRequests(100)
             
         {
 
             for (auto& worker : workers)
             {
-                workers.emplace_back(ProcessLoadRequests);
+                worker = std::thread(&FileLoaderSystem::ProcessLoadRequests, this);
             }
-        }
-
-        /**
-         * This request MUST happen
-         * @param req 
-         */
-        void submitLoadRequests(LoadRequest&& req)
-        {
-            requests.push(req);
-        }
-
-        /**
-         * this request doesn't need to happen urgently, fail if it doesn't happen
-         * @param req 
-         */
-        bool try_submitLoadRequests(LoadRequest&& req)
-        {
-            return requests.try_push(req);
         }
         
         ~FileLoaderSystem()
@@ -70,59 +73,154 @@ namespace AngelBase::Core
             }
         }
         
-    private:
-        static std::vector<unsigned char> Load(const std::string& filepath)
+        /**
+         * Asynchronous load request -- public Facing API
+         * @param path path to file
+         * @param buffer buffer to store results
+         * @param buffer_size max buffer size you want to allow
+         * @param priority priority of this load request
+         * @param c Counter that async file request is dependent on
+         * @param callback function to call when it's done
+         * @return 
+         */
+        [[nodiscard]] AsyncRequestHandle asyncReadFile(const char * path, AsyncFileBuffer buffer, size_t buffer_size, AsyncFilePriority priority, Atomics::Counter& c,void(*callback)(AsyncRequestHandle))
         {
-            std::ifstream file(filepath, std::ios::binary);
-            if (!file.is_open())
+            c.increment();
+            
+            AsyncRequestHandle request;
+            request.path = path;
+            request.handle = nullptr;
+            request.buffer = buffer;
+            request.buffer_size = buffer_size;
+            request.actual_size = 0;
+            request.priority = priority;
+            request.dependent_on = c;
+            request.result = std::make_shared<std::atomic<AsyncFileResult>>(AsyncFileResult::Pending);
+            request.callback = callback;
+            
+            switch (priority)
             {
-                return {};
+            case AsyncFilePriority::Critical:
+                criticalRequests.push(request);
+                break;
+            case AsyncFilePriority::High:
+                highRequests.push(request);
+                break;
+            case AsyncFilePriority::Normal:
+                normalRequests.push(request);
+                break;
+            case AsyncFilePriority::Low:
+                lowRequests.push(request);
+                break;
             }
-
-            file.seekg(0, std::ios::end);
-            size_t fileSize = file.tellg();
-            file.seekg(0, std::ios::beg);
-    
-            std::vector<unsigned char> buffer(fileSize);
-            file.read(reinterpret_cast<char*>(buffer.data()), fileSize);
-            file.close();
-    
-            return buffer;
+            return request;
         }
         
-        std::vector<std::thread> workers;
-
-        std::atomic<bool> _shutdown = false;
-        rigtorp::mpmc::Queue<LoadRequest> requests;
-
-        // for now we will just make blocking IO on these threads... should be okay.
+        /**
+         * fence function to wait for the load request to finish
+         * @param handle 
+         */
+        static void asyncWaitComplete(const AsyncRequestHandle& handle)
+        {
+            handle.dependent_on.wait_for_zero();
+        }
+        
+    protected:
+        
+        friend class TextureManager;
+        
+        /**
+         * Used to attempt to open the file for reading
+         * @param path_name name of the path to open
+         * @return Returns a FILE* as a AsyncFileHandle, or nullptr if it fails. Check!
+         */
+        static [[nodiscard]] AsyncFileHandle asyncOpen(const char * path_name)
+        {
+            AsyncFileHandle handle = nullptr;
+            errno_t error = fopen_s(&handle, path_name, "rb"); 
+            if (error != 0)
+            {
+                char buffer[512];
+                strerror_s(buffer, error);
+                std::cerr << "asyncOpen failed: " << buffer << "\n";
+            }
+            return handle;
+        }
+        
+        // sample-- don't use in production-- callback for when done
+        static void asyncReadComplete(AsyncRequestHandle file)
+        {
+            std::cout << "asyncReadComplete" << std::endl;
+        }
+        
+        //sample of this code in action
+        void sampleLoadTexture(const char* path)
+        {
+            Atomics::Counter c;
+            uint8_t* buffer = GetBufferFromThreadAllocator(512);
+            auto handle = asyncReadFile(path, buffer, 512, AsyncFilePriority::Critical, c, asyncReadComplete);
+            
+            //fence to wait for it to complete-- if it absolutely needs to happen first
+            asyncWaitComplete(handle);
+        }
+        // get buffer from thread local pool
+        uint8_t* GetBufferFromThreadAllocator(size_t size)
+        {
+            return new uint8_t[size];
+        }
+        
+    private:
+        
+        static void Load(AsyncRequestHandle&& handle)
+        {
+            handle.dependent_on.increment();
+            handle.handle = asyncOpen(handle.path);
+            if (!handle.handle)
+            {
+                handle.result.get()->store(AsyncFileResult::Failed);
+                handle.callback(handle);
+                return;
+            }
+            handle.actual_size = fread_s(handle.buffer, handle.buffer_size, 1, handle.buffer_size, handle.handle);
+            if (ferror(handle.handle))
+            {
+                handle.result.get()->store(AsyncFileResult::Failed);
+                handle.callback(handle);
+                fclose(handle.handle);
+                return;
+            }
+            handle.callback(handle);
+            fclose(handle.handle);
+            handle.result.get()->store(AsyncFileResult::Success);
+            handle.dependent_on.decrement();
+        }
+        
+        
         void ProcessLoadRequests()
         {
-            DWORD_PTR mask = 1ULL << coreId;
-            SetThreadAffinityMask(GetCurrentThread(), mask);
-            
-            while (!_shutdown.load(std::memory_order_acquire))
+            while (!_shutdown)
             {
-                LoadRequest request;
-                
-                // Try to pop a request (non-blocking with timeout simulation)
-                if (requests.try_pop(request))
+                AsyncRequestHandle req;
+                if (criticalRequests.try_pop(req) ||
+                    highRequests.try_pop(req)     ||
+                    normalRequests.try_pop(req)   ||
+                    lowRequests.try_pop(req))
                 {
-                    // Perform the I/O operation
-                    auto data = Load(request.filepath);
-                    
-                    // now finish
-                    request.callback(LoadResult{request.filepath, data, true});
+                    Load(std::move(req));
                 }
                 else
                 {
-                    // No work available, yield to avoid busy-waiting
-                    std::this_thread::sleep_for(std::chrono::microseconds(100));
+                    std::this_thread::yield();
                 }
             }
         }
+        
+        std::vector<std::thread> workers;
+        std::atomic<bool> _shutdown = false;
+        rigtorp::mpmc::Queue<AsyncRequestHandle> criticalRequests;
+        rigtorp::mpmc::Queue<AsyncRequestHandle> highRequests;
+        rigtorp::mpmc::Queue<AsyncRequestHandle> normalRequests;
+        rigtorp::mpmc::Queue<AsyncRequestHandle> lowRequests;
         unsigned int coreId = 7;
-
-        Allocator::ArenaAllocator<1024 * 1024 * 1024> buffer;
     };
 }
