@@ -15,6 +15,5 @@ This project is intended to be a commercial use engine. Contact project lead at 
 Make sure to read STYLE.md before contributing! Following these rules is important for keeping compilation times low and using the safest features of C++!
 
 ## Credits
-- Project led by Sakura Shih
-- Amy Ackermann - programming support
-- Medusa Slockbower - programming support
+- Project developed by Sakura Shih
+
