@@ -147,7 +147,7 @@ $RECYCLE.BIN/
 
 # Build artifacts
 bin/
-lib/
+#lib/
 *.log
 *.tlog
 
