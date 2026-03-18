@@ -37,7 +37,7 @@ namespace Rendering
             size_t index = current_texture_index++;
             raw_texture_data.emplace_back();
             {
-                auto fs = ServiceLocator::Instance()->Get<AngelBase::Core::FileLoaderSystem>().lock().get();
+                auto fs = ServiceLocator::Instance()->Get<AngelBase::Core::FileLoaderSystem>();
                 AngelBase::Core::AsyncRequestHandle h =  fs->asyncReadFile(
                     path, 
                     raw_texture_data[index].data(), 

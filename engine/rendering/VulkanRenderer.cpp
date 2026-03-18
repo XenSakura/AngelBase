@@ -27,7 +27,7 @@ import VulkanDescriptors;
 import ServiceLocator;
 import ShaderManager;
 import VulkanPipeline;
-
+import TextureManager;
 VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 
 namespace Rendering::Vulkan
@@ -50,13 +50,6 @@ namespace Rendering::Vulkan
 				delete_functions.pop();
 			}
 		}
-	};
-
-	struct Vertex
-	{
-		glm::vec3 pos;
-		glm::vec3 normal;
-		glm::vec2 uv;
 	};
 
 	
@@ -92,7 +85,7 @@ namespace Rendering::Vulkan
 		bool initialize(uint32_t width, uint32_t height)
 		{
 			m_window_manager = std::make_shared<WindowManager>();
-			ServiceLocator::Instance()->RegisterSystem<WindowManager>(m_window_manager);
+			ServiceLocator::Instance()->RegisterSystem<WindowManager>(m_window_manager.get());
 			m_window_manager->ResizeWindow(2560, 1440);
 			//1. Init instance
 			{
@@ -373,7 +366,7 @@ namespace Rendering::Vulkan
 			//5. initialize and create swapchain
 			{
 				m_swapchain_manager = std::make_shared<SwapchainManager>(m_context);
-				ServiceLocator::Instance()->RegisterSystem(m_swapchain_manager);
+				ServiceLocator::Instance()->RegisterSystem(m_swapchain_manager.get());
 				m_swapchain_manager.get()->createSwapchain(width, height);
 			}
 
@@ -403,7 +396,7 @@ namespace Rendering::Vulkan
 			//7. Create draw and depth image targets
 			{
 				m_render_target_manager = std::make_shared<RenderTargetManager>(m_context);
-				ServiceLocator::Instance()->RegisterSystem<RenderTargetManager>(m_render_target_manager);
+				ServiceLocator::Instance()->RegisterSystem<RenderTargetManager>(m_render_target_manager.get());
 				VkExtent3D extent = m_window_manager.get()->VulkanGetWindowDimensions();
 				m_render_target_manager->createDrawColorTarget(extent);
 				m_render_target_manager->createDepthTarget(extent);
@@ -412,7 +405,7 @@ namespace Rendering::Vulkan
 			//8. Create Command Pools and Command Queues
 			{
 				m_command_pool_manager = std::make_shared<CommandPoolManager>(m_context);
-				ServiceLocator::Instance()->RegisterSystem<CommandPoolManager>(m_command_pool_manager);
+				ServiceLocator::Instance()->RegisterSystem<CommandPoolManager>(m_command_pool_manager.get());
 				auto manager = m_command_pool_manager.get();
 				manager->BuildRenderCommandStructures();
 				manager->BuildTransferCommandStructures();
@@ -434,13 +427,12 @@ namespace Rendering::Vulkan
 
 			//10. Load relevant textures
 			{
-				
 			}
 
 			//10. Build Descriptor pools and sets
 			{
 				m_descriptor_manager = std::make_shared<DescriptorManager>(m_context);
-				ServiceLocator::Instance()->RegisterSystem<DescriptorManager>(m_descriptor_manager);
+				ServiceLocator::Instance()->RegisterSystem<DescriptorManager>(m_descriptor_manager.get());
 				
 			}
 
