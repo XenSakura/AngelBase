@@ -74,6 +74,8 @@ namespace Rendering::Vulkan
             
             transfer_command.command_buffer = m_context.device.allocateCommandBuffers(command_buffer_info)[0];
             
+            
+            
             vk::FenceCreateInfo fence_info = {};
             
             transfer_command.transfer_fence = m_context.device.createFence(fence_info);

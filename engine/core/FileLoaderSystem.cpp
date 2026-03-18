@@ -147,28 +147,6 @@ namespace AngelBase::Core
             return handle;
         }
         
-        // sample-- don't use in production-- callback for when done
-        static void asyncReadComplete(AsyncRequestHandle file)
-        {
-            std::cout << "asyncReadComplete" << std::endl;
-        }
-        
-        //sample of this code in action
-        void sampleLoadTexture(const char* path)
-        {
-            Atomics::Counter c;
-            uint8_t* buffer = GetBufferFromThreadAllocator(512);
-            auto handle = asyncReadFile(path, buffer, 512, AsyncFilePriority::Critical, c, asyncReadComplete);
-            
-            //fence to wait for it to complete-- if it absolutely needs to happen first
-            asyncWaitComplete(handle);
-        }
-        // get buffer from thread local pool
-        uint8_t* GetBufferFromThreadAllocator(size_t size)
-        {
-            return new uint8_t[size];
-        }
-        
     private:
         
         static void Load(AsyncRequestHandle&& handle)
